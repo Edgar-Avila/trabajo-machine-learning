@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Customer Churn Risk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Riesgo de abandono de clientes</h1>
+      <p>Estime la probabilidad de que un cliente abandone su suscripción.</p>
+      <form id="prediction-form">
+        <label>Customer ID<input name="CustomerID" required /></label>
+        <label
+          >Age<input name="Age" type="number" min="18" max="120" required
+        /></label>
+        <label
+          >Gender<select name="Gender">
+            <option>Male</option>
+            <option>Female</option>
+          </select></label
+        >
+        <label
+          >Tenure (months)<input name="Tenure" type="number" min="0" required
+        /></label>
+        <label
+          >Usage Frequency<input
+            name="Usage Frequency"
+            type="number"
+            min="0"
+            required
+        /></label>
+        <label
+          >Support Calls<input
+            name="Support Calls"
+            type="number"
+            min="0"
+            required
+        /></label>
+        <label
+          >Payment Delay (days)<input
+            name="Payment Delay"
+            type="number"
+            min="0"
+            required
+        /></label>
+        <label
+          >Subscription Type<input name="Subscription Type" required
+        /></label>
+        <label>Contract Length<input name="Contract Length" required /></label>
+        <label
+          >Total Spend<input
+            name="Total Spend"
+            type="number"
+            min="0"
+            step="0.01"
+            required
+        /></label>
+        <label
+          >Last Interaction (days)<input
+            name="Last Interaction"
+            type="number"
+            min="0"
+            required
+        /></label>
+        <button type="submit">Predecir riesgo</button>
+      </form>
+      <p id="message" role="status"></p>
+      <h2>Clientes predichos</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Churn probability</th>
+            <th>Risk</th>
+          </tr>
+        </thead>
+        <tbody id="customers"></tbody>
+      </table>
+    </main>
+    <script src="/script.js"></script>
+  </body>
+</html>

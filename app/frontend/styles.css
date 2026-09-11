@@ -1,0 +1,55 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #172033;
+  background: #f4f7fb;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px #1b31501a;
+}
+form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1rem;
+}
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+input,
+select,
+button {
+  padding: 0.65rem;
+  border: 1px solid #b7c3d6;
+  border-radius: 6px;
+  font: inherit;
+}
+button {
+  align-self: end;
+  background: #1657b7;
+  color: white;
+  border: 0;
+  cursor: pointer;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #dde4ef;
+}
+#message {
+  min-height: 1.5rem;
+  color: #a11;
+}
