@@ -30,6 +30,7 @@ class PredictorService:
     def __init__(self, settings: Settings, model: Any | None = None) -> None:
         self.settings, self.model = settings, model
         self.model_source = "injected" if model is not None else "unavailable"
+        self.model_version: str | None = None
         self.feature_names = self._load_feature_names(settings.feature_list_path)
         if model is None:
             self._load_model()
@@ -51,15 +52,35 @@ class PredictorService:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise ModelUnavailableError(f"Could not read feature list at {path}: {exc}") from exc
 
+    def _resolve_model_path(self) -> tuple[Path, str | None]:
+        """Resolve the active artifact path and version from the versions dir."""
+        versions_dir = self.settings.model_versions_dir
+        if versions_dir is not None and versions_dir.exists():
+            current_file = versions_dir / "current.txt"
+            if current_file.exists():
+                try:
+                    version = current_file.read_text(encoding="utf-8").strip()
+                    return versions_dir / version / "model.pkl", version
+                except OSError as exc:
+                    raise ModelUnavailableError(f"Could not read {current_file}: {exc}") from exc
+            version_dirs = [p for p in versions_dir.iterdir() if p.is_dir() and p.name.isdigit()]
+            if version_dirs:
+                version = str(max(int(p.name) for p in version_dirs))
+                return versions_dir / version / "model.pkl", version
+        return self.settings.model_path, None
+
     def _load_model(self) -> None:
         try:
-            self.model = joblib.load(self.settings.model_path)
+            path, version = self._resolve_model_path()
+            self.model = joblib.load(path)
             self.model_source = "artifact"
-            logger.info("Model loaded from %s", self.settings.model_path)
+            self.model_version = version
+            logger.info("Model loaded from %s (version %s)", path, version)
         except (OSError, ValueError, ImportError) as exc:
             if not self.settings.allow_fallback_model:
                 raise ModelUnavailableError(f"Model could not be loaded from {self.settings.model_path}") from exc
             self.model, self.model_source = FallbackChurnModel(), "fallback"
+            self.model_version = None
             logger.warning("Using fallback model because artifact could not load: %s", exc)
 
     def predict_probability(self, customer: CustomerInput) -> float:

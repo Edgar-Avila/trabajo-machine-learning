@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Clientes y churn</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Clientes y riesgo de abandono</h1>
+      <p id="summary" role="status"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Edad</th>
+            <th>Género</th>
+            <th>Suscripción</th>
+            <th>Contrato</th>
+            <th>Churn</th>
+            <th>Riesgo</th>
+            <th>Modelo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="customers"></tbody>
+      </table>
+      <nav id="pagination" aria-label="Paginación"></nav>
+
+      <h2>Dashboard</h2>
+      <section id="dashboard" class="dashboard" aria-label="Resumen de clientes"></section>
+      <p><a href="/">Volver al formulario de predicción</a></p>
+    </main>
+
+    <div id="customer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Historial del cliente">
+      <div class="modal-box">
+        <button id="modal-close" class="modal-close" aria-label="Cerrar">×</button>
+        <h2 id="modal-title"></h2>
+        <div id="modal-content"></div>
+      </div>
+    </div>
+
+    <script src="/customers.js"></script>
+  </body>
+</html>

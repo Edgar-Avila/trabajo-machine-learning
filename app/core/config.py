@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     app_name: str = "Customer Churn Risk App"
     app_version: str = "1.0.0"
     model_path: Path = Field(default=Path(__file__).resolve().parents[2] / "model" / "model.pkl")
+    model_versions_dir: Path | None = None
+    db_path: Path | None = None
     feature_list_path: Path | None = None
     allow_fallback_model: bool = True
     frontend_directory: Path = Path(__file__).resolve().parents[1] / "frontend"

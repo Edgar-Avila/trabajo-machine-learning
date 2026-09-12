@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routes import router
 from core.config import get_settings
 from core.exceptions import register_exception_handlers
+from services.customers import CustomerRepository
 from services.predictor import PredictorService
 
 def create_app(predictor: PredictorService | None = None) -> FastAPI:
@@ -13,6 +14,7 @@ def create_app(predictor: PredictorService | None = None) -> FastAPI:
     logging.basicConfig(level=settings.log_level)
     application = FastAPI(title=settings.app_name, version=settings.app_version)
     application.state.predictor = predictor or PredictorService(settings)
+    application.state.customer_repository = CustomerRepository(settings.db_path)
     application.include_router(router)
     register_exception_handlers(application)
     application.mount("/", StaticFiles(directory=settings.frontend_directory, html=True), name="frontend")
