@@ -29,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Load CSV data into the churn database.")
     parser.add_argument("--data", required=True, help="Path to the CSV dataset.")
     parser.add_argument("--db", required=True, help="Path to the SQLite database file.")
-    parser.add_argument("--max-rows", type=int, default=2000, help="Max rows to load.")
+    parser.add_argument("--max-rows", type=int, default=20000, help="Max rows to load.")
     args = parser.parse_args()
 
     data = pd.read_csv(args.data)

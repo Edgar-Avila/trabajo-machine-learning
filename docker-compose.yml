@@ -6,9 +6,22 @@ services:
     volumes:
       - ./data:/data:ro
       - ./db:/db
-    command: python seed.py --data /data/customer_churn_dataset-testing-master.csv --db /db/churn.db --max-rows 2000
+    command: python seed.py --data /data/customer_churn_dataset-testing-master.csv --db /db/churn.db --max-rows 20000
 
-  train:
+  ingest:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+    depends_on:
+      db_seed:
+        condition: service_completed_successfully
+    volumes:
+      - ./data:/data:ro
+      - ./db:/db
+    command: python ingest.py --data /data/customer_churn_dataset-testing-master.csv --db /db/churn.db --interval 300
+    restart: unless-stopped
+
+  scheduler:
     build:
       context: ./ml
       dockerfile: Dockerfile
@@ -18,27 +31,16 @@ services:
     volumes:
       - ./db:/db
       - ./model:/opt/model
-    command: python train.py --db /db/churn.db --output /opt/model --max-rows 2000
-
-  predict:
-    build:
-      context: ./ml
-      dockerfile: Dockerfile
-    depends_on:
-      train:
-        condition: service_completed_successfully
-    volumes:
-      - ./db:/db
-      - ./model:/opt/model
-    command: python predict.py --db /db/churn.db --model-dir /opt/model
+    command: python scheduler.py --db /db/churn.db --model-dir /opt/model --interval 43200
+    restart: unless-stopped
 
   app:
     build:
       context: ./app
       dockerfile: Dockerfile
     depends_on:
-      predict:
-        condition: service_completed_successfully
+      scheduler:
+        condition: service_started
     ports:
       - "8000:8000"
     volumes:
@@ -50,3 +52,4 @@ services:
       - MODEL_VERSIONS_DIR=/opt/model
       - DB_PATH=/db/churn.db
       - ALLOW_FALLBACK_MODEL=false
+    restart: unless-stopped

@@ -85,7 +85,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train a churn classifier.")
     parser.add_argument("--db", required=True, help="Path to the SQLite database file.")
     parser.add_argument("--output", required=True, help="Directory where versioned artifacts are stored.")
-    parser.add_argument("--max-rows", type=int, default=2000, help="Max rows to train on.")
+    parser.add_argument("--max-rows", type=int, default=None, help="Optional cap on rows to train on (default: all).")
     args = parser.parse_args()
 
     conn = connect(args.db)
