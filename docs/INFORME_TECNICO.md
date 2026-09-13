@@ -98,7 +98,9 @@ python scheduler.py --db /db/churn.db --model-dir /opt/model --interval 43200
 
 ## 1. Arquitectura de la aplicación
 
-La aplicación entrega predicciones individuales de abandono de clientes mediante una API REST construida con FastAPI y una interfaz web estática servida por la misma aplicación. La responsabilidad de esta capa es validar el contrato de entrada, convertirlo al formato de inferencia y presentar el resultado; no entrena ni reentrena el modelo.
+La capa de aplicación operacionaliza el modelo de predicción de abandono mediante una API REST construida con FastAPI y una interfaz web estática servida por la misma instancia. Esta capa no entrena el modelo: consume el pipeline serializado producido por el proceso de ML, valida las entradas de inferencia y presenta tanto estimaciones individuales como las predicciones masivas persistidas.
+
+El flujo integra tres artefactos compartidos con los procesos de ML: la base SQLite `db/churn.db`, el directorio de modelos versionados `model/` y el archivo `model/current.txt`. El entrenamiento genera un pipeline que incluye preprocesamiento y clasificador; posteriormente, la predicción por lote calcula la probabilidad de churn de todos los clientes y la almacena en la tabla `predictions`, junto con la versión de modelo y la fecha de predicción. La aplicación consulta estos resultados, por lo que no recalcula ni modifica las predicciones persistidas.
 
 ![Diagrama de arquitectura](./assets/arquitectura.png)
 
@@ -108,13 +110,50 @@ La estructura bajo `/app` separa responsabilidades:
 | --- | --- |
 | `main.py` | Punto de entrada ASGI. Construye la instancia FastAPI, registra rutas, manejadores globales de errores y publica el frontend. |
 | `api/` | Contratos Pydantic en `schemas.py` y definición HTTP de los endpoints en `routes.py`. Los endpoints delegan la inferencia al servicio. |
-| `services/` | Lógica de negocio independiente del transporte HTTP: carga e inferencia del modelo (`predictor.py`) y clasificación de riesgo (`risk.py`). |
+| `services/` | Lógica de negocio independiente del transporte HTTP: carga e inferencia del modelo (`predictor.py`), clasificación de riesgo (`risk.py`) y consulta de clientes, agregados e historial de predicciones (`customers.py`). |
 | `core/` | Configuración mediante variables de entorno (`config.py`) y excepciones/manejadores de errores comunes (`exceptions.py`). |
-| `frontend/` | Interfaz estática: formulario de cliente, llamada `fetch` al endpoint y tabla de predicciones realizadas durante la sesión del navegador. |
+| `frontend/` | Interfaz estática: formulario de inferencia individual y página de clientes con tabla paginada, resumen agregado e historial por versión. |
 | `tests/` | Pruebas unitarias y de endpoint. Usan un modelo mock, por lo que no requieren el artefacto real del equipo de ML. |
 | `Dockerfile` | Definición de una imagen ejecutable de la aplicación. |
 
-## 2. Endpoints de la API
+## 2. Datos, flujo de aplicación e integración con el modelo
+
+La inferencia individual recibe las diez características utilizadas por el pipeline de entrenamiento, excluyendo `CustomerID`, que se conserva únicamente como identificador:
+
+| Tipo | Características |
+| --- | --- |
+| Numéricas | `Age`, `Tenure`, `Usage Frequency`, `Support Calls`, `Payment Delay`, `Total Spend`, `Last Interaction` |
+| Categóricas | `Gender`, `Subscription Type`, `Contract Length` |
+
+`PredictorService` carga el artefacto con `joblib.load()`. Cuando se configura `MODEL_VERSIONS_DIR`, resuelve primero la versión indicada por `current.txt`; si este archivo no existe, selecciona el directorio numérico de versión más alto disponible. En ausencia de un directorio de versiones, utiliza `MODEL_PATH`. Para una solicitud válida, el servicio elimina `CustomerID`, construye un `pandas.DataFrame` de una fila con las características en el orden esperado y ejecuta `predict_proba`. La segunda posición de la salida binaria (`[0][1]`) se interpreta como la probabilidad de la clase positiva, `Churn`.
+
+El artefacto generado por `ml/train.py` es un `Pipeline` de scikit-learn que encapsula el `ColumnTransformer` y `RandomForestClassifier`; por ello, el escalado de variables numéricas y la codificación one-hot de variables categóricas se ejecutan en la inferencia con la misma transformación usada en entrenamiento. La aplicación no reimplementa este procesamiento. De forma opcional, `FEATURE_LIST_PATH` permite proporcionar el contrato de columnas como una lista JSON o como un objeto `{"features": [...]}`; dicho contrato debe mantenerse consistente con los aliases y las validaciones de `api/schemas.py`.
+
+Para la vista de clientes, la aplicación lee de SQLite la versión más reciente presente en `predictions`, une esa tabla con `customers` por `CustomerID` y ordena los resultados por probabilidad de churn descendente. Los agregados del dashboard —cantidad de clientes, probabilidad media, distribución por nivel de riesgo y medias por tipo de suscripción y duración de contrato— se calculan sobre esa misma versión. El historial de un cliente conserva las probabilidades generadas para cada versión y la diferencia respecto de la versión anterior. Por tanto, estas vistas representan resultados generados por `ml/predict.py`, no nuevas evaluaciones del modelo.
+
+El flujo completo de aplicación es el siguiente:
+
+1. El planificador entrena o conserva el pipeline vigente y ejecuta la predicción por lote sobre los registros de `customers`.
+2. `ml/predict.py` persiste `CustomerID`, `ChurnProbability`, `ModelVersion` y `PredictedAt` en `predictions`.
+3. Al iniciar, FastAPI carga el artefacto activo para atender inferencias individuales y crea el repositorio de consultas SQLite.
+4. `POST /predict` valida el cliente, ejecuta el pipeline y devuelve la probabilidad y su nivel de riesgo.
+5. `GET /customers`, `GET /customers/summary` y `GET /customers/{customer_id}/history` exponen, respectivamente, la última predicción masiva paginada, sus agregados y la evolución por versión; la interfaz web consume estos endpoints.
+
+El nivel de riesgo es una regla de presentación posterior a la inferencia: `Low` para probabilidades menores de 0.35, `Medium` para valores desde 0.35 hasta menos de 0.65 y `High` para valores iguales o superiores a 0.65. Esta regla no altera la probabilidad producida por el modelo ni sustituye las métricas de evaluación descritas en la sección de entrenamiento.
+
+Variables relevantes:
+
+| Variable | Comportamiento |
+| --- | --- |
+| `MODEL_PATH` | Ruta de respaldo para un archivo joblib/pickle cuando no se usa un directorio de versiones. Por defecto apunta a `model/model.pkl` en la raíz del proyecto. |
+| `MODEL_VERSIONS_DIR` | Directorio raíz de los modelos versionados; permite resolver el modelo activo mediante `current.txt`. |
+| `DB_PATH` | Ubicación de la base SQLite que contiene `customers` y `predictions`; si no existe, las consultas de clientes devuelven colecciones vacías. |
+| `FEATURE_LIST_PATH` | Ruta opcional al archivo JSON con el contrato y orden de columnas. |
+| `ALLOW_FALLBACK_MODEL` | Si es `true` y no se carga el artefacto, activa `FallbackChurnModel`, un modelo heurístico determinista destinado exclusivamente a desarrollo. |
+
+Con `ALLOW_FALLBACK_MODEL=false`, un artefacto ausente, ilegible o inválido impide inicializar el predictor y se informa un error de modelo no disponible. El fallback no es un modelo entrenado y no debe emplearse para decisiones de producción. En la configuración de Docker y Docker Compose se mantiene desactivado.
+
+## 3. Endpoints de la API
 
 ### `GET /health`
 
@@ -126,11 +165,12 @@ Respuesta exitosa (`200 OK`):
 {
   "status": "ok",
   "model_loaded": true,
-  "model_source": "artifact"
+  "model_source": "artifact",
+  "model_version": "1"
 }
 ```
 
-`model_source` puede ser `artifact` si se cargó el archivo configurado, `fallback` si está activo el modelo local de demostración, o `injected` cuando se inyecta un modelo en pruebas. El estado es `ok` mientras exista un modelo disponible; de lo contrario sería `degraded`.
+`model_source` puede ser `artifact` si se cargó un artefacto, `fallback` si está activo el modelo local de demostración, o `injected` cuando se inyecta un modelo en pruebas. `model_version` se informa cuando el artefacto se resolvió desde el directorio versionado y, en los demás casos, puede ser `null`. El estado es `ok` mientras exista un modelo disponible; de lo contrario es `degraded`.
 
 ### `POST /predict`
 
@@ -166,36 +206,27 @@ La probabilidad se redondea a cuatro decimales en la respuesta. La clasificació
 
 ### `GET /customers`
 
-Es un endpoint reservado para una futura lista de predicciones o clientes persistidos. Actualmente no recibe parámetros y devuelve siempre una lista vacía:
+Devuelve la última versión disponible de las predicciones persistidas, ordenada de mayor a menor probabilidad de churn. Recibe los parámetros opcionales `page` (mínimo 1; por defecto 1) y `page_size` (entre 1 y 100; por defecto 10). La respuesta incluye la página solicitada, el total de clientes y el número de páginas. Cada elemento conserva las características del cliente, la probabilidad, el nivel de riesgo derivado y la versión de modelo.
+
+Cuando la base de datos no existe o aún no hay predicciones, devuelve una respuesta paginada vacía; no realiza inferencia en línea. Por ejemplo:
 
 ```json
-[]
+{
+  "items": [],
+  "page": 1,
+  "page_size": 10,
+  "total": 0,
+  "total_pages": 0
+}
 ```
 
-**Pendiente / trabajo futuro:** no existe todavía una base de datos, repositorio ni persistencia de clientes. La tabla del frontend conserva resultados solamente en el DOM de la sesión actual.
+### `GET /customers/summary`
 
-## 3. Integración con el modelo de ML
+Calcula los indicadores del dashboard para la versión más reciente: total de clientes, probabilidad media de churn, conteos y porcentajes por nivel de riesgo, y medias de probabilidad agrupadas por `Subscription Type` y `Contract Length`. Cuando no existen predicciones devuelve valores y listas vacías.
 
-La clase `PredictorService` lee `MODEL_PATH` y carga el artefacto mediante `joblib.load()`. El objeto debe exponer `predict_proba(features)` y devolver una estructura binaria donde la columna/posición `[0][1]` es la probabilidad de churn. Se recomienda entregar un pipeline serializado que incluya el preprocesamiento, para que encoding y transformaciones se apliquen de la misma forma que durante el entrenamiento.
+### `GET /customers/{customer_id}/history`
 
-Antes de inferir, el servicio elimina `CustomerID` y crea un `pandas.DataFrame` de una fila. Por defecto, las columnas enviadas al modelo son:
-
-```text
-Age, Gender, Tenure, Usage Frequency, Support Calls, Payment Delay,
-Subscription Type, Contract Length, Total Spend, Last Interaction
-```
-
-La ruta opcional `FEATURE_LIST_PATH` permite suministrar el orden/nombre de columnas como una lista JSON o como `{"features": [...]}`. Si el contrato del modelo cambia, se debe actualizar conjuntamente esa lista y los aliases/validaciones de `api/schemas.py`.
-
-Variables relevantes:
-
-| Variable | Comportamiento |
-| --- | --- |
-| `MODEL_PATH` | Ubicación del archivo joblib/pickle. Localmente el valor por defecto apunta a `../model/model.pkl` respecto a la carpeta `app`. |
-| `ALLOW_FALLBACK_MODEL` | Si es `true` y no se puede cargar el artefacto, activa `FallbackChurnModel`, un modelo heurístico determinista para desarrollo. |
-| `FEATURE_LIST_PATH` | Ruta opcional al archivo JSON con el contrato de columnas. |
-
-Con `ALLOW_FALLBACK_MODEL=false`, un archivo ausente, ilegible o inválido impide inicializar el predictor y se genera un error de modelo no disponible. El fallback no es un modelo entrenado y no debe usarse para decisiones de producción. El Dockerfile lo desactiva de forma predeterminada.
+Devuelve el historial de probabilidades almacenadas para un cliente a través de las versiones de modelo. Cada registro incluye versión, probabilidad, nivel de riesgo, fecha de predicción y cambio de probabilidad frente a la versión previa; también incluye la etiqueta `Churn` almacenada en `customers` cuando está disponible. Si el cliente no tiene predicciones persistidas, responde `404`.
 
 ## 4. Validación y manejo de errores
 
@@ -240,7 +271,7 @@ Los casos actuales son:
 | `test_risk_classification.py` | Bandas Low/Medium/High, casos límite 0.35 y 0.65, y rechazo de probabilidad fuera de [0, 1]. |
 | `conftest.py` | Cliente FastAPI, cliente de ejemplo y modelo mock reutilizables. |
 
-El resultado esperado es una suite exitosa sin depender de `model.pkl`. En la versión implementada se obtienen 11 pruebas aprobadas.
+Estas pruebas validan la API de inferencia, el contrato de entrada, la integración del servicio con un clasificador compatible y las reglas de riesgo, sin depender de `model.pkl`. La suite declarada contiene 11 pruebas. Los endpoints de consulta de clientes y dashboard dependen de la base SQLite poblada por el flujo de ML y no cuentan con pruebas automatizadas específicas en `app/tests`.
 
 ## 6. Despliegue con Docker
 
@@ -283,7 +314,7 @@ El volumen monta el artefacto en modo solo lectura. Para producción se debe con
    Copy-Item .env.example .env
    ```
 
-4. Para desarrollo sin artefacto ML, mantener `ALLOW_FALLBACK_MODEL=true` en `.env`. Para usar el modelo real, establecer `MODEL_PATH` con su ruta y preferiblemente definir `ALLOW_FALLBACK_MODEL=false`.
+4. Para desarrollo sin artefacto ML, mantener `ALLOW_FALLBACK_MODEL=true` en `.env`. Para usar el modelo real, establecer `MODEL_PATH` o `MODEL_VERSIONS_DIR` con una ruta accesible y definir `ALLOW_FALLBACK_MODEL=false`. Para consultar clientes y dashboard, configurar también `DB_PATH` hacia la base SQLite poblada.
 
 5. Ejecutar pruebas:
 
