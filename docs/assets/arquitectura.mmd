@@ -1,0 +1,9 @@
+flowchart LR
+    U[Usuario] --> F[Frontend HTML/CSS/JavaScript]
+    F -->|POST /predict| A[FastAPI API]
+    A --> V[Pydantic validation]
+    V --> S[PredictorService]
+    S --> M[Serialized ML model<br/>or development fallback]
+    M --> S
+    S --> R[Risk classification]
+    R -->|JSON prediction| F
