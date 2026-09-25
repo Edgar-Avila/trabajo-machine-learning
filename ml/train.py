@@ -86,6 +86,7 @@ def main() -> None:
     parser.add_argument("--db", required=True, help="Path to the SQLite database file.")
     parser.add_argument("--output", required=True, help="Directory where versioned artifacts are stored.")
     parser.add_argument("--max-rows", type=int, default=None, help="Optional cap on rows to train on (default: all).")
+    parser.add_argument("--no-promote", action="store_true", help="Do not update current.txt automatically (delegates to MLOps gatekeeper).")
     args = parser.parse_args()
 
     conn = connect(args.db)
@@ -147,8 +148,12 @@ def main() -> None:
     (version_dir / MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
-    (artifacts_dir / CURRENT_NAME).write_text(str(version), encoding="utf-8")
-    print(f"Model v{version} saved to {model_path}")
+
+    if not args.no_promote:
+        (artifacts_dir / CURRENT_NAME).write_text(str(version), encoding="utf-8")
+        print(f"Model v{version} saved to {model_path} and promoted to current.txt")
+    else:
+        print(f"Model v{version} saved to {model_path} (promotion pending MLOps gatekeeper)")
 
 
 if __name__ == "__main__":
